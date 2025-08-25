@@ -466,4 +466,95 @@ public class DatabaseManager {
             pstmt.executeUpdate();
         }
     }
+
+    /**
+     * Generate a unique roll number for a new student
+     * Format: [COURSE_CODE][YEAR][SEQUENTIAL_NUMBER]
+     * Example: CS2024001, IT2024001, ME2024001
+     */
+    public String generateRollNumber(Integer courseId) {
+        try {
+            // Get course code
+            String courseCode = getCourseCode(courseId);
+            if (courseCode == null) {
+                courseCode = "GEN"; // Default for unknown courses
+            }
+            
+            // Get current year (last 2 digits)
+            String currentYear = String.valueOf(java.time.LocalDate.now().getYear()).substring(2);
+            
+            // Get next sequential number for this course and year
+            String nextNumber = getNextRollNumberSequence(courseCode, currentYear);
+            
+            return courseCode + currentYear + nextNumber;
+            
+        } catch (SQLException e) {
+            System.err.println("Error generating roll number: " + e.getMessage());
+            // Fallback: timestamp-based roll number
+            return "STU" + System.currentTimeMillis() % 10000;
+        }
+    }
+    
+    /**
+     * Get the course code for a given course ID
+     */
+    private String getCourseCode(Integer courseId) throws SQLException {
+        if (courseId == null) return "GEN";
+        
+        String sql = "SELECT code FROM courses WHERE id = ?";
+        try (PreparedStatement pstmt = getConnection().prepareStatement(sql)) {
+            pstmt.setInt(1, courseId);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getString("code");
+                }
+            }
+        }
+        return "GEN";
+    }
+    
+    /**
+     * Get the next sequential number for roll number generation
+     */
+    private String getNextRollNumberSequence(String courseCode, String year) throws SQLException {
+        String pattern = courseCode + year + "%";
+        String sql = "SELECT roll_number FROM students WHERE roll_number LIKE ? ORDER BY roll_number DESC LIMIT 1";
+        
+        try (PreparedStatement pstmt = getConnection().prepareStatement(sql)) {
+            pstmt.setString(1, pattern);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    String lastRollNumber = rs.getString("roll_number");
+                    // Extract the sequential number part
+                    String seqPart = lastRollNumber.substring(courseCode.length() + year.length());
+                    try {
+                        int nextSeq = Integer.parseInt(seqPart) + 1;
+                        return String.format("%03d", nextSeq); // 3-digit format with leading zeros
+                    } catch (NumberFormatException e) {
+                        // If parsing fails, start with 001
+                        return "001";
+                    }
+                }
+            }
+        }
+        return "001"; // First student for this course and year
+    }
+    
+    /**
+     * Check if a roll number already exists
+     */
+    public boolean rollNumberExists(String rollNumber) {
+        String sql = "SELECT COUNT(*) FROM students WHERE roll_number = ?";
+        try (PreparedStatement pstmt = getConnection().prepareStatement(sql)) {
+            pstmt.setString(1, rollNumber);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getInt(1) > 0;
+                }
+            }
+        } catch (SQLException e) {
+            System.err.println("Error checking roll number existence: " + e.getMessage());
+        }
+        return false;
+    }
 }
